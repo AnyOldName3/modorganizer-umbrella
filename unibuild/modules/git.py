@@ -26,7 +26,10 @@ from unibuild import Task
 def Popen(cmd, **kwargs):
     pc = ''
     if 'cwd' in kwargs:
-        pc += os.path.relpath(kwargs['cwd'],os.path.abspath('..'))
+        try:
+            pc += os.path.relpath(kwargs['cwd'],os.path.abspath('..'))
+        except ValueError:
+            pc += kwargs['cwd']
     pc += '>'
     for arg in cmd:
         pc += ' ' + arg
@@ -77,15 +80,24 @@ class SuperRepository(Task):
 
 
 class Clone(Repository):
-    def __init__(self, url, branch, super_repository=None, update=True, commit=None, shallowclone=False):
+    def __init__(self, url, branch, feature_branch=None, super_repository=None, update=True, commit=None, shallowclone=False):
         if config['shallowclone']:
             self.shallowclone = True
-        super(Clone, self).__init__(url, branch)
+        super(Clone, self).__init__(url, branch, feature_branch)
         self.__super_repository = super_repository
         self.__base_name = os.path.basename(self._url)
         self.__update = update
         self.__commit = commit
         self.__shallowclone = shallowclone
+
+        if self._feature_branch is not None:
+            proc = Popen([config['paths']['git'], "ls-remote", "--heads", "--exit-code", self._url, self._feature_branch],
+                     env=config["__environment"])
+            if proc is not None:
+                proc.communicate()
+                if proc.returncode != 2:
+                    self._branch = self._feature_branch
+
         if self.__super_repository is not None:
             self._output_file_path = os.path.join(self.__super_repository.path, self.__determine_name())
             self.depend(super_repository)

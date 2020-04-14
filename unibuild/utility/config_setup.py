@@ -20,9 +20,9 @@ import logging
 import os.path
 import sys
 
-from config import config
+from config import config, path_or_default
 from unibuild.utility.visualstudio import visual_studio, visual_studio_environment
-from unibuild.utility.qt import qt_install
+from unibuild.utility.qt import qt_install,get_base_qt_path
 from unibuild.utility.lazy import Evaluate, Lazy
 
 
@@ -44,18 +44,27 @@ def init_config(args):
     # some tools gets confused onto what constitutes .  (OpenSSL and maybe CMake)
     args.destination = os.path.realpath(args.destination)
 
+    # locate python
+    if sys.executable is not None:
+        config['paths']['python'] = Lazy(sys.executable)
+    else:
+        (major, minor) = sys.version_info
+        python = get_from_hklm("HKEY_LOCAL_MACHINE", r"SOFTWARE\Python\PythonCore\{}.{}\InstallPath".format(major, minor), "ExecutablePath")
+        if python is not None:
+            config['paths']['python'] = Lazy(python)
+        else:
+            python = get_from_hklm("HKEY_LOCAL_MACHINE", r"SOFTWARE\Python\PythonCore\{}.{}\InstallPath".format(major, minor), "")
+            if python is not None:
+                config['paths']['python'] = Lazy(lambda: os.path.join(python, "python.exe"))
+            else:
+                config['paths']['python'] = Lazy(lambda: os.path.join(get_from_hklm("HKEY_CURRENT_USER", r"SOFTWARE\Python\PythonCore\{}.{}\InstallPath".format(major, minor), ""), "python.exe"))
+
     for d in list(config['paths'].keys()):
         if isinstance(config['paths'][d], str):
             config['paths'][d] = config['paths'][d].format(base_dir=os.path.abspath(args.destination),
                                                            build_dir=args.builddir,
                                                            progress_dir=args.progressdir,
                                                            install_dir=args.installdir)
-
-    python = get_from_hklm("HKEY_LOCAL_MACHINE", r"SOFTWARE\Python\PythonCore\{}\InstallPath".format(config['python_version']), "")
-    if python is not None:
-        config['paths']['python'] = Lazy(lambda: os.path.join(python, "python.exe"))
-    else:
-        config['paths']['python'] = Lazy(lambda: os.path.join(get_from_hklm("HKEY_CURRENT_USER", r"SOFTWARE\Python\PythonCore\{}\InstallPath".format(config['python_version']), ""), "python.exe"))
 
     # parse -s argument.  Example -s paths.build=bin would set config[paths][build] to bin
     if args.set:
@@ -66,6 +75,9 @@ def init_config(args):
             for ele in path[:-1]:
                 cur = cur.setdefault(ele, {})
             cur[path[-1]] = value
+
+    if config["Installer"]:
+        config['paths']["InnoSetup"] = path_or_default("ISCC.exe", [["Inno Setup 5"], ["Inno Setup 6"]])
 
     if config['architecture'] not in ['x86_64', 'x86']:
         raise ValueError("only architectures supported are x86 and x86_64")
@@ -81,9 +93,15 @@ def init_config(args):
     config['__build_base_path'] = os.path.abspath(args.destination)
     config['__Umbrella_path'] = os.getcwd()
     config['__Arguments'] = args
+    config['paths']['jom'] = path_or_default("jom.exe", [[get_base_qt_path(), "Tools", "QtCreator", "bin"]])
 
     if 'PYTHON' not in config['__environment']:
         config['__environment']['PYTHON'] = sys.executable
+
+    if config["Release_Build"]:
+        config["Build_Branch"] = config["Release_Branch"]
+    else:
+        config["Build_Branch"] = config["Dev_Branch"]
 
 def dump_config():
     #logging.debug("config['__environment']=%s", config['__environment'])
